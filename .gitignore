@@ -42,6 +42,15 @@ yarn-error.log*
 .claude/skills/
 .claude/settings.local.json
 
+# Local-only AI tool setup (skills and Cursor MCP config stay on this machine)
+.agents/
+.cursor/
+skills-lock.json
+
+# Personal planning notes and Claude Code rules (local only)
+PROJECT.md
+CLAUDE.md
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
