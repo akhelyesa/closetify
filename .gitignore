@@ -37,6 +37,11 @@ yarn-error.log*
 # vercel
 .vercel
 
+# Claude Code skill links: these point at .agents/skills on this machine only.
+# Recreate them with: npx skills experimental_install -a claude-code
+.claude/skills/
+.claude/settings.local.json
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
