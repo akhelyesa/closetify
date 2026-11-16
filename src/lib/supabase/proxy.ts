@@ -54,7 +54,7 @@ export async function updateSession(request: NextRequest) {
 
   if (isSignedIn && isAuthPage) {
     const redirectUrl = request.nextUrl.clone()
-    redirectUrl.pathname = "/"
+    redirectUrl.pathname = "/closet"
     return withSession(supabaseResponse, NextResponse.redirect(redirectUrl))
   }
 

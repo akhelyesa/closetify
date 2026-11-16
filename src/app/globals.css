@@ -49,7 +49,9 @@
 }
 
 :root {
-  --background: oklch(1 0 0);
+  color-scheme: light;
+  /* Closetify: off-white page, white cards, black as the only accent. */
+  --background: #f7f6f3;
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.145 0 0);

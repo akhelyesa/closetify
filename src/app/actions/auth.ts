@@ -80,7 +80,7 @@ export async function signUp(
     }
   }
 
-  redirect("/")
+  redirect("/closet")
 }
 
 export async function signIn(
@@ -95,7 +95,7 @@ export async function signIn(
 
   if (error) return { error: error.message }
 
-  redirect("/")
+  redirect("/closet")
 }
 
 export async function signOut() {

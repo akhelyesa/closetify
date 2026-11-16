@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -15,6 +15,13 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Closetify",
   description: "Your wardrobe, on one screen.",
+};
+
+export const viewport: Viewport = {
+  themeColor: "#f7f6f3",
+  colorScheme: "light",
+  // Lets the tab bar sit above the iPhone home indicator.
+  viewportFit: "cover",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
