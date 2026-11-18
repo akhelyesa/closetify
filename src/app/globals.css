@@ -130,3 +130,13 @@
     @apply font-sans;
   }
 }
+
+/* Loading shimmer for photo placeholders. */
+@keyframes shimmer {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}

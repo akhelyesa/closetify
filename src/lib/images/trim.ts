@@ -45,6 +45,24 @@ export function padBounds(
   }
 }
 
+/**
+ * True when a real part of the image is see-through: a photo whose background was
+ * already removed (e.g. iPhone "lift subject" → Save Image). Normal photos are fully opaque.
+ */
+export function hasTransparentBackground(
+  { data, width, height }: RgbaPixels,
+  minShare = 0.05,
+  maxAlpha = 16,
+) {
+  let transparent = 0
+  const total = width * height
+  for (let i = 3; i < total * 4; i += 4) {
+    if ((data[i] ?? 255) < maxAlpha) transparent++
+  }
+  // Fully transparent means there's nothing to show, so that's not a usable cutout either.
+  return transparent >= total * minShare && transparent < total
+}
+
 /** Share of the image covered by the clothing. A tiny share usually means a bad cutout. */
 export function coverage(bounds: Bounds, imageWidth: number, imageHeight: number) {
   return (bounds.width * bounds.height) / (imageWidth * imageHeight)

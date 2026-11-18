@@ -13,87 +13,46 @@ import {
 } from "@/components/items/item-details-form"
 import { Button } from "@/components/ui/button"
 import { uuidV4 } from "@/lib/images/formats"
-import {
-  PhotoError,
-  prepareCutout,
-  prepareKeepBackground,
-  prepareOriginal,
-  type CutoutPhotos,
-  type CutoutProgress,
-} from "@/lib/images/process"
+import { PhotoError, preparePhotos, type PreparedPhotos } from "@/lib/images/process"
 import { itemDetailsSchema } from "@/lib/items/schema"
 import { uploadItemPhotos } from "@/lib/items/upload"
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
 
-type Stage =
-  | { kind: "pick" }
-  | { kind: "processing"; progress: CutoutProgress | null }
-  | { kind: "review" }
-  | { kind: "saving" }
+type Stage = "pick" | "preparing" | "review" | "saving"
 
 export function AddItemFlow({ userId, brands }: { userId: string; brands: string[] }) {
   const router = useRouter()
   const cameraInput = useRef<HTMLInputElement>(null)
   const libraryInput = useRef<HTMLInputElement>(null)
-  const originalCanvas = useRef<HTMLCanvasElement | null>(null)
+  // Each picked photo gets a run number, so a slow result from an earlier pick is ignored.
+  const run = useRef(0)
 
-  const [stage, setStage] = useState<Stage>({ kind: "pick" })
-  const [original, setOriginal] = useState<Blob | null>(null)
-  const [cutout, setCutout] = useState<CutoutPhotos | null>(null)
-  const [kept, setKept] = useState<CutoutPhotos | null>(null)
-  const [useCutout, setUseCutout] = useState(true)
-  const [notice, setNotice] = useState<string | null>(null)
+  const [stage, setStage] = useState<Stage>("pick")
+  const [photos, setPhotos] = useState<PreparedPhotos | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [form, setForm] = useState<ItemFormValue>(EMPTY_ITEM_FORM)
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
 
-  const chosen = useCutout && cutout ? cutout : kept
-  const originalUrl = useObjectUrl(original)
-  const previewUrl = useObjectUrl(chosen?.cutout ?? null)
+  const previewUrl = useObjectUrl(photos?.cutout ?? null)
 
   async function handleFile(file: File | undefined) {
     if (!file) return
-    reset()
-    setStage({ kind: "processing", progress: null })
+    const thisRun = ++run.current
+    setError(null)
+    setStage("preparing")
 
-    let prepared: Awaited<ReturnType<typeof prepareOriginal>>
     try {
-      prepared = await prepareOriginal(file)
+      const prepared = await preparePhotos(file)
+      if (run.current !== thisRun) return
+      setPhotos(prepared)
+      setStage("review")
     } catch (err) {
-      setStage({ kind: "pick" })
+      if (run.current !== thisRun) return
+      console.error("Preparing photo failed", err)
+      setStage(photos ? "review" : "pick")
       setError(err instanceof PhotoError ? err.message : "Couldn't open this photo. Try another one.")
-      return
     }
-
-    originalCanvas.current = prepared.canvas
-    setOriginal(prepared.blob)
-
-    let result: CutoutPhotos | null = null
-    try {
-      result = await prepareCutout(prepared.blob, (progress) =>
-        setStage({ kind: "processing", progress }),
-      )
-    } catch (err) {
-      console.error("Background removal failed", err)
-    }
-
-    if (result) {
-      setCutout(result)
-      setUseCutout(true)
-    } else {
-      // Never block the user on a bad cutout: keep the photo as it is.
-      setKept(await prepareKeepBackground(prepared.canvas))
-      setUseCutout(false)
-      setNotice("Couldn't separate the item from the background, so the full photo is kept.")
-    }
-    setStage({ kind: "review" })
-  }
-
-  async function keepBackground() {
-    if (!originalCanvas.current) return
-    if (!kept) setKept(await prepareKeepBackground(originalCanvas.current))
-    setUseCutout(false)
   }
 
   async function save() {
@@ -106,30 +65,22 @@ export function AddItemFlow({ userId, brands }: { userId: string; brands: string
       return
     }
     setFieldErrors({})
-    if (!original || !chosen) return
+    if (!photos) return
 
-    setStage({ kind: "saving" })
+    setStage("saving")
     const id = uuidV4()
     try {
-      await uploadItemPhotos(createClient(), userId, id, {
-        original,
-        cutout: chosen.cutout,
-        thumb: chosen.thumb,
-      })
+      await uploadItemPhotos(createClient(), userId, id, photos)
     } catch (err) {
       console.error("Photo upload failed", err)
-      setStage({ kind: "review" })
+      setStage("review")
       setError("Couldn't upload the photos. Check your connection and try again.")
       return
     }
 
-    const result = await createItem({
-      id,
-      hasCutout: chosen === cutout,
-      details: toDetailsInput(form),
-    })
+    const result = await createItem({ id, hasCutout: photos.hasCutout, details: toDetailsInput(form) })
     if (!result.ok) {
-      setStage({ kind: "review" })
+      setStage("review")
       setFieldErrors(result.fieldErrors ?? {})
       setError(result.error)
       return
@@ -137,52 +88,21 @@ export function AddItemFlow({ userId, brands }: { userId: string; brands: string
     router.push("/closet")
   }
 
-  function reset() {
-    originalCanvas.current = null
-    setOriginal(null)
-    setCutout(null)
-    setKept(null)
-    setUseCutout(true)
-    setNotice(null)
-    setError(null)
-  }
-
   const fileInputs = (
     <>
-      <input
-        ref={cameraInput}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        className="sr-only"
-        tabIndex={-1}
-        onChange={(e) => {
-          void handleFile(e.target.files?.[0])
-          e.target.value = ""
-        }}
-      />
-      <input
-        ref={libraryInput}
-        type="file"
-        accept="image/*"
-        className="sr-only"
-        tabIndex={-1}
-        onChange={(e) => {
-          void handleFile(e.target.files?.[0])
-          e.target.value = ""
-        }}
-      />
+      <PhotoInput inputRef={cameraInput} capture onFile={handleFile} />
+      <PhotoInput inputRef={libraryInput} onFile={handleFile} />
     </>
   )
 
-  if (stage.kind === "pick") {
+  if (stage === "pick") {
     return (
       <div className="flex flex-col gap-4">
         {fileInputs}
         <div className="flex flex-col items-center rounded-2xl bg-card px-6 py-12 text-center">
           <p className="font-medium">Add a piece of clothing</p>
           <p className="mt-1 max-w-xs text-sm text-muted-foreground">
-            Lay it flat or hang it up, on a plain background if you can.
+            Lay it flat or hang it up, on a plain background.
           </p>
           <div className="mt-8 flex w-full max-w-xs flex-col gap-3">
             <Button size="lg" className="h-11" onClick={() => cameraInput.current?.click()}>
@@ -197,58 +117,45 @@ export function AddItemFlow({ userId, brands }: { userId: string; brands: string
               <ImageIcon /> Choose from library
             </Button>
           </div>
+          <p className="mt-8 max-w-xs text-xs leading-relaxed text-muted-foreground">
+            On iPhone, touch and hold the item in Photos, then Share → Save Image. Pick that image
+            here and the background is already gone.
+          </p>
         </div>
         {error ? <ErrorText>{error}</ErrorText> : null}
       </div>
     )
   }
 
-  if (stage.kind === "processing") {
+  if (stage === "preparing" && !photos) {
     return (
-      <div className="relative overflow-hidden rounded-2xl bg-card">
-        <PhotoFrame src={originalUrl} alt="" className="opacity-40" />
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center">
-          <LoaderCircle aria-hidden className="size-6 animate-spin" />
-          <p className="text-sm font-medium" aria-live="polite">
-            {stage.progress?.stage === "download"
-              ? `Downloading the background remover (one-time) ${stage.progress.percent}%`
-              : original
-                ? "Removing the background…"
-                : "Opening photo…"}
-          </p>
-        </div>
+      <div className="relative aspect-square overflow-hidden rounded-2xl bg-card" aria-busy>
+        <span className="sr-only">Preparing photo</span>
+        <div className="absolute inset-0 animate-[shimmer_1.4s_ease-in-out_infinite] bg-gradient-to-r from-transparent via-muted to-transparent motion-reduce:animate-none" />
       </div>
     )
   }
 
-  const saving = stage.kind === "saving"
+  const busy = stage === "saving" || stage === "preparing"
 
   return (
     <div className="flex flex-col gap-8">
       {fileInputs}
       <section className="flex flex-col gap-3">
-        <div className="overflow-hidden rounded-2xl bg-card">
-          <PhotoFrame src={previewUrl ?? originalUrl} alt="Preview" />
-        </div>
-
-        {cutout ? (
-          <div className="flex gap-2" role="group" aria-label="Photo style">
-            <SegmentButton active={useCutout} onClick={() => setUseCutout(true)} disabled={saving}>
-              Cutout
-            </SegmentButton>
-            <SegmentButton active={!useCutout} onClick={() => void keepBackground()} disabled={saving}>
-              Keep background
-            </SegmentButton>
+        <div className={cn("overflow-hidden rounded-2xl bg-card transition-opacity duration-200", stage === "preparing" && "opacity-50")}>
+          <div className="flex aspect-square w-full items-center justify-center p-6">
+            {previewUrl ? (
+              // Local preview of an object URL; next/image doesn't apply here.
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={previewUrl} alt="Preview" className="max-h-full max-w-full object-contain" />
+            ) : null}
           </div>
-        ) : null}
-
-        {notice ? <p className="text-sm text-muted-foreground">{notice}</p> : null}
-
+        </div>
         <button
           type="button"
-          disabled={saving}
+          disabled={busy}
           onClick={() => libraryInput.current?.click()}
-          className="self-start text-sm text-muted-foreground underline-offset-4 hover:underline"
+          className="self-start text-sm text-muted-foreground underline-offset-4 hover:underline disabled:opacity-50"
         >
           Use a different photo
         </button>
@@ -258,8 +165,8 @@ export function AddItemFlow({ userId, brands }: { userId: string; brands: string
 
       <div className="flex flex-col gap-3">
         {error ? <ErrorText>{error}</ErrorText> : null}
-        <Button size="lg" className="h-11 w-full" onClick={() => void save()} disabled={saving}>
-          {saving ? (
+        <Button size="lg" className="h-11 w-full" onClick={() => void save()} disabled={busy}>
+          {stage === "saving" ? (
             <>
               <LoaderCircle className="animate-spin" /> Saving…
             </>
@@ -272,33 +179,27 @@ export function AddItemFlow({ userId, brands }: { userId: string; brands: string
   )
 }
 
-function PhotoFrame({ src, alt, className }: { src: string | null; alt: string; className?: string }) {
+function PhotoInput({
+  inputRef,
+  capture,
+  onFile,
+}: {
+  inputRef: React.RefObject<HTMLInputElement | null>
+  capture?: boolean
+  onFile: (file: File | undefined) => void
+}) {
   return (
-    <div className="flex aspect-square w-full items-center justify-center bg-card p-6">
-      {src ? (
-        // Local preview of an object URL; next/image doesn't apply here.
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={src} alt={alt} className={cn("max-h-full max-w-full object-contain", className)} />
-      ) : null}
-    </div>
-  )
-}
-
-function SegmentButton({
-  active,
-  className,
-  ...props
-}: React.ComponentProps<"button"> & { active: boolean }) {
-  return (
-    <button
-      type="button"
-      aria-pressed={active}
-      className={cn(
-        "h-10 flex-1 rounded-lg border text-sm font-medium transition-colors duration-150 disabled:opacity-50",
-        active ? "border-foreground bg-foreground text-background" : "border-border bg-card hover:bg-muted",
-        className,
-      )}
-      {...props}
+    <input
+      ref={inputRef}
+      type="file"
+      accept="image/*"
+      capture={capture ? "environment" : undefined}
+      className="sr-only"
+      tabIndex={-1}
+      onChange={(e) => {
+        onFile(e.target.files?.[0])
+        e.target.value = ""
+      }}
     />
   )
 }

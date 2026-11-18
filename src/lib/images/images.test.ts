@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import { isAcceptedPhoto, uuidV4 } from "@/lib/images/formats"
-import { coverage, opaqueBounds, padBounds } from "@/lib/images/trim"
+import { coverage, hasTransparentBackground, opaqueBounds, padBounds } from "@/lib/images/trim"
 
 /** Builds a fake RGBA image where only the given pixels are opaque. */
 function pixels(width: number, height: number, opaque: [number, number][]) {
@@ -75,6 +75,31 @@ describe("padBounds", () => {
       width: 1000,
       height: 500,
     })
+  })
+})
+
+describe("hasTransparentBackground", () => {
+  /** width × height image where `opaque` pixels are visible and the rest see-through. */
+  function withOpaqueCount(total: number, opaque: number) {
+    const data = new Uint8ClampedArray(total * 4)
+    for (let i = 0; i < opaque; i++) data[i * 4 + 3] = 255
+    return { data, width: total, height: 1 }
+  }
+
+  it("is true for a lifted-subject photo (item on a see-through background)", () => {
+    expect(hasTransparentBackground(withOpaqueCount(100, 40))).toBe(true)
+  })
+
+  it("is false for a normal, fully opaque photo", () => {
+    expect(hasTransparentBackground(withOpaqueCount(100, 100))).toBe(false)
+  })
+
+  it("ignores a few see-through pixels at the edge", () => {
+    expect(hasTransparentBackground(withOpaqueCount(100, 98))).toBe(false)
+  })
+
+  it("is false for a fully transparent image (nothing to show)", () => {
+    expect(hasTransparentBackground(withOpaqueCount(100, 0))).toBe(false)
   })
 })
 
